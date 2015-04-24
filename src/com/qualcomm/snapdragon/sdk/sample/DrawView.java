@@ -52,8 +52,8 @@ public class DrawView extends SurfaceView {
     float lastResultNoseTipY;
     
     // Constant scale factor offset for nose tip
-    float NS_SCALE_X = 4.5f;
-    float NS_SCALE_Y = 4.5f;
+    float NS_SCALE_X = 3.8f;
+    float NS_SCALE_Y = 3.8f;
     
     private int DEGREE_INTERVAL = 45;
     private int TARGET_RADIUS = 70;
@@ -67,7 +67,7 @@ public class DrawView extends SurfaceView {
     float avgX = 0;
     float avgY = 0;
     
-    public int RUNNING_ARR_LEN = 2;
+    public int RUNNING_ARR_LEN = 5;
     
     static final float ALPHA = 0.001f;
     
@@ -239,27 +239,20 @@ public class DrawView extends SurfaceView {
                     canvas.drawCircle(mFaceArray[i].nose.noseTip.x * scaleX, mFaceArray[i].nose.noseTip.y * scaleY, 5f,
                             mouthBrush);
                     
+                    /** ------- [START - NOSE TIP COORD PROCEDURES] ------- */
                     // Change scale offset
                     canvas.drawCircle((mFaceArray[i].nose.noseTip.x * scaleX), (mFaceArray[i].nose.noseTip.y * scaleY), 15f,
                             mouthBrush);
                     canvas.drawLine((mFaceArray[i].nose.noseTip.x), (mFaceArray[i].nose.noseTip.y), 
                     		mFaceArray[i].nose.noseTip.x * scaleX, mFaceArray[i].nose.noseTip.y * scaleY, mouthBrush);
                     
-                    
-                    
-                    float noseTipX = lastNoseTipSampleX;
-                    float noseTipY = lastNoseTipSampleY;
-                    
-                    if ( sampleCount == 0 ) {
-	                    noseTipX = mFaceArray[i].nose.noseTip.x * scaleX;
-	                    noseTipY = mFaceArray[i].nose.noseTip.y * scaleY;
-                    }
+                    float noseTipX = mFaceArray[i].nose.noseTip.x * scaleX;
+                    float noseTipY = mFaceArray[i].nose.noseTip.y * scaleY;
                     
                     lastNoseTipSampleX = noseTipX;
                     lastNoseTipSampleY = noseTipY;
                     
                     Log.d("Nose", "(" + noseTipX + ", " + noseTipY + ")\t" + "Sample: " + sampleCount);
-
                     
                     float noseTipXnormalized = noseTipX - mSurfaceWidth/2;
                     float noseTipYnormalized = noseTipY - mSurfaceHeight/2;
@@ -278,29 +271,13 @@ public class DrawView extends SurfaceView {
                     
                     resultNoseTipX = computeRunningAverage(runningArrayX);
                     resultNoseTipY = computeRunningAverage(runningArrayY);
-                    
-                    /*resultNoseTipX = lowPass(resultNoseTipX, xTotal);
-                    resultNoseTipY = lowPass(resultNoseTipY, yTotal);*/
-                    
-                    // Perform easing to smoothen out cursor
-                    
-                    /*float dx = resultNoseTipX - lastResultNoseTipX;
-                    if ( Math.abs(dx) > 1) {
-                    	Log.d("nose", "EASE-X");
-                    	resultNoseTipX += dx * 0.05;
-                    }
-                    
-                    float dy = resultNoseTipY - lastResultNoseTipY;
-                    if ( Math.abs(dy) > 1) {
-                    	Log.d("nose", "EASE-Y");
-                    	resultNoseTipY += dy * 0.05;
-                    }*/
-                    
+                   
                     lastResultNoseTipX = resultNoseTipX;
                     lastResultNoseTipY = resultNoseTipY;
                     
                     mouthBrush.setColor(Color.MAGENTA);
                     canvas.drawCircle(resultNoseTipX, resultNoseTipY, 20f, mouthBrush);
+                    /** ------- [END - NOSE TIP COORD PROCEDURES] ------- */
                     
                     mouthBrush.setColor(Color.CYAN);
                     canvas.drawCircle(mFaceArray[i].nose.noseLowerLeft.x * scaleX, mFaceArray[i].nose.noseLowerLeft.y
@@ -346,9 +323,9 @@ public class DrawView extends SurfaceView {
 		return sum/arr.length;
 	}
 
-	public void setPointer( float f, float g) {
-    	this.pointerX = (int) ((mSurfaceWidth/2) + f);
-    	this.pointerY = (int) ((mSurfaceHeight/2) + g);
+	public void setPointer( double d, double e) {
+    	this.pointerX = (int) ((mSurfaceWidth/2) + d);
+    	this.pointerY = (int) ((mSurfaceHeight/2) + e);
     }
     
     /**

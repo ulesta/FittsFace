@@ -81,6 +81,11 @@ public class CameraPreviewActivity extends Activity implements Camera.PreviewCal
     PointF gazePointValue = null;
     private final String TAG = "CameraPreviewActivity";
 
+    private double[] runningArrayX;
+    private double[] runningArrayY;
+    private int runningCounter = 0;
+    private int RUNNING_LENGTH = 10;
+    
     // TextView Variables
     TextView numFaceText, smileValueText, leftBlinkText, rightBlinkText, gazePointText, faceRollText, faceYawText,
     facePitchText, horizontalGazeText, verticalGazeText;
@@ -158,7 +163,10 @@ public class CameraPreviewActivity extends Activity implements Camera.PreviewCal
         orientationListener();
 
         display = ((WindowManager) getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay();
-
+        
+        // initialize running array
+        runningArrayX = new double[RUNNING_LENGTH];
+        runningArrayY = new double[RUNNING_LENGTH];
     }
 
     FaceDetectionListener faceDetectionListener = new FaceDetectionListener() {
@@ -512,19 +520,32 @@ public class CameraPreviewActivity extends Activity implements Camera.PreviewCal
                     yaw = faceArray[j].getYaw();
                     horizontalGaze = faceArray[j].getEyeHorizontalGazeAngle();
                     verticalGaze = faceArray[j].getEyeVerticalGazeAngle();
+                    
                 }
                 
-                yawMapped = lowPass(yaw, yawMapped);
-                pitchMapped = lowPass(pitch, pitchMapped);
+                runningArrayX[runningCounter] = yaw;
+                runningArrayY[runningCounter] = pitch + 15;
                 
-                drawView.setPointer(yawMapped*80, pitchMapped*-80);
+                runningCounter = (runningCounter + 1) % RUNNING_LENGTH;
+                
+                
+                drawView.setPointer(computeRunningAvg(runningArrayX)*30, -computeRunningAvg(runningArrayY)*30);
                 setUI(numFaces, smileValue, leftEyeBlink, rightEyeBlink, faceRollValue, yaw, pitch, gazePointValue,
                         horizontalGaze, verticalGaze);
             }
         }
     }
     
-    protected float lowPass( float input, float output ) {
+
+	private double computeRunningAvg(double[] arr) {
+		double sum = 0.0;
+		for (int i = 0; i < arr.length; i++) {
+			sum += arr[i];
+		}
+		return sum/arr.length;
+	}
+
+	protected float lowPass( float input, float output ) {
         if ( output == 0 ) return input;
             
         output = output + ALPHA * (input - output);
