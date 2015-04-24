@@ -9,10 +9,12 @@
 package com.qualcomm.snapdragon.sdk.sample;
 
 import java.util.EnumSet;
+import java.util.HashMap;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Paint;
@@ -57,7 +59,7 @@ public class AngularCalibrationActivity extends Activity implements Camera.Previ
     Canvas canvas = new Canvas();
     Paint rectBrush = new Paint();
     private CameraSurfacePreview mPreview;
-    private DrawView drawView;
+    private StateDrawView drawView;
     private GameDrawView gameDrawView;
     private final int FRONT_CAMERA_INDEX = 1;
     private final int BACK_CAMERA_INDEX = 0;
@@ -107,6 +109,11 @@ public class AngularCalibrationActivity extends Activity implements Camera.Previ
     
     int[][] stateMatrix;
     int initialState = 0;
+    int state = initialState;
+    
+    double[] runningAverage;
+    int RUNNING_AVERAGE_SAMPLE_SIZE = 10;
+    int runningCalibrationCounter;
     
     float lastTimeNano;
     float elapsedTimeNano;
@@ -114,6 +121,22 @@ public class AngularCalibrationActivity extends Activity implements Camera.Previ
     float startTimeNano;
     boolean blinkInterrupted = false;
     float interruptStart;
+    
+    /**						s0		s1		s2		s3		s4		s5		s6		s7
+     * s0: look straight yaw												s1
+     * s1: look straight pitch												s2
+     * s2: rotate up														s3
+     * s3: rotate down														s4
+     * s4: rotate left														s5
+     * s5: rotate right														s6
+     * s6: calibrating
+     * s7: recorded
+     * s8: done																		nextActivity
+     */
+    
+    double avgFrontYaw, avgFrontPitch, avgMaxPitch, avgMinPitch, avgMaxYaw, avgMinYaw;
+    
+    HashMap<Integer, String> stateOut;
     
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -133,6 +156,15 @@ public class AngularCalibrationActivity extends Activity implements Camera.Previ
         horizontalGazeText = (TextView) findViewById(R.id.horizontalGazeAngle);
         verticalGazeText = (TextView) findViewById(R.id.verticalGazeAngle);
 
+        stateOut = new HashMap<Integer, String>();
+        stateOut.put(0, "Look straight and close and hold right eye");
+        stateOut.put(1, "Look straight again and close and hold right eye");
+        stateOut.put(2, "Slightly rotate head upwards and close and hold right eye");
+        stateOut.put(3, "Slightly rotate head downwards and close and hold right eye");
+        stateOut.put(4, "Slightly rotate head left and close and hold right eye");
+        stateOut.put(5, "Slightly rotate head right and close and hold right eye");
+        stateOut.put(6, "Keep right eye closed. Calibrating...");
+        
         // Check to see if the FacialProc feature is supported in the device or no.
         fpFeatureSupported = FacialProcessing
                 .isFeatureSupported(FacialProcessing.FEATURE_LIST.FEATURE_FACIAL_PROCESSING);
@@ -179,15 +211,18 @@ public class AngularCalibrationActivity extends Activity implements Camera.Previ
         runningArrayY = new double[RUNNING_LENGTH];
         
         /**						s0		s1		s2		s3		s4		s5		s6		s7
-         * s0: look straight													s1
-         * s1: rotate up														s2
-         * s2: rotate down														s3
-         * s3: rotate left														s4
-         * s4: rotate right														s7
-         * s5: smiling
+         * s0: look straight yaw												s1
+         * s1: look straight pitch												s2
+         * s1: rotate up														s3
+         * s2: rotate down														s4
+         * s3: rotate left														s5
+         * s4: rotate right														s6
+         * s5: calibrating
          * s6: recorded
          * s7: done																		nextActivity
          */
+        
+        runningAverage = new double[RUNNING_AVERAGE_SAMPLE_SIZE];
         
     }
 
@@ -493,15 +528,9 @@ public class AngularCalibrationActivity extends Activity implements Camera.Previ
             Log.d("TAG", "No Face Detected");
             if (drawView != null) {
                 preview.removeView(drawView);
-
-                drawView = DrawView.getInstance(this, null, false, 0, 0, null, landScapeMode);
+                drawView = StateDrawView.getInstance(this, null, false, 0, 0, null, landScapeMode);
+                drawView.setState(stateOut.get(state));
                 preview.addView(drawView);
-            }
-            if (gameDrawView != null) {
-                preview.removeView(gameDrawView);
-
-                gameDrawView = new GameDrawView(this, null, false, 0, 0, null, landScapeMode);
-                preview.addView(gameDrawView);
             }
             canvas.drawColor(0, Mode.CLEAR);
             setUI(0, 0, 0, 0, 0, 0, 0, null, 0, 0);
@@ -509,9 +538,9 @@ public class AngularCalibrationActivity extends Activity implements Camera.Previ
 
             Log.d("TAG", "Face Detected");
             faceArray = faceProc.getFaceData(EnumSet.of(FacialProcessing.FP_DATA.FACE_RECT,
-                    FacialProcessing.FP_DATA.FACE_COORDINATES, FacialProcessing.FP_DATA.FACE_CONTOUR,
+                    FacialProcessing.FP_DATA.FACE_COORDINATES,
                     FacialProcessing.FP_DATA.FACE_SMILE, FacialProcessing.FP_DATA.FACE_ORIENTATION,
-                    FacialProcessing.FP_DATA.FACE_BLINK, FacialProcessing.FP_DATA.FACE_GAZE));
+                    FacialProcessing.FP_DATA.FACE_BLINK));
             // faceArray = faceProc.getFaceData(); // Calling getFaceData() alone will give you all facial data except the
             // face
             // contour. Face Contour might be a heavy operation, it is recommended that you use it only when you need it.
@@ -525,32 +554,69 @@ public class AngularCalibrationActivity extends Activity implements Camera.Previ
                 }
 
                 faceProc.normalizeCoordinates(surfaceWidth, surfaceHeight);
-                preview.removeView(drawView);// Remove the previously created view to avoid unnecessary stacking of Views.
-                preview.removeView(gameDrawView);
-                drawView = DrawView.getInstance(this, faceArray, true, surfaceWidth, surfaceHeight, cameraObj, landScapeMode);
-                gameDrawView = new GameDrawView(this, faceArray, true, surfaceWidth, surfaceHeight, cameraObj, landScapeMode);
-                preview.addView(drawView);
-//                preview.addView(gameDrawView);
+                preview.removeView(drawView);
+        		drawView = StateDrawView.getInstance(this, faceArray, true, surfaceWidth, surfaceHeight, cameraObj, landScapeMode);
+        		drawView.setState(stateOut.get(state));
+        		preview.addView(drawView);
 
                 for (int j = 0; j < numFaces; j++) {
-                    smileValue = faceArray[j].getSmileValue();
+                    //smileValue = faceArray[j].getSmileValue();
                     leftEyeBlink = faceArray[j].getLeftEyeBlink();
                     rightEyeBlink = faceArray[j].getRightEyeBlink();
-                    faceRollValue = faceArray[j].getRoll();
-                    gazePointValue = faceArray[j].getEyeGazePoint();
+                    //faceRollValue = faceArray[j].getRoll();
+                    //gazePointValue = faceArray[j].getEyeGazePoint();
                     pitch = faceArray[j].getPitch();
                     yaw = faceArray[j].getYaw();
-                    horizontalGaze = faceArray[j].getEyeHorizontalGazeAngle();
-                    verticalGaze = faceArray[j].getEyeVerticalGazeAngle();
+                    //horizontalGaze = faceArray[j].getEyeHorizontalGazeAngle();
+                    //verticalGaze = faceArray[j].getEyeVerticalGazeAngle();
                     
-                    
+                    // check if user is blinking the right eye
                     if (rightEyeBlink > 60) {
                     	if (!blinkStarted) {
+                    		runningCalibrationCounter = 0;
                     		startTimeNano = System.nanoTime();
                     		blinkStarted = true;
+                    		
                     	}
                     	if (blinkStarted && ((System.nanoTime() - startTimeNano)/1000000) > 1000) {
-                    		Log.d("state", "calibration!");
+                    		Log.d("state", "calibration! state=" + state);
+                    		// Calibration has begun
+                    		
+                    		drawView.setState(stateOut.get(6));
+                    		
+                    		
+                    		switch (state) {
+							case 0:
+								runningAverage[runningCalibrationCounter] = yaw;
+								break;
+							case 1:
+								runningAverage[runningCalibrationCounter] = pitch;
+								break;
+							case 2:
+								runningAverage[runningCalibrationCounter] = pitch;
+								break;
+							case 3:
+								runningAverage[runningCalibrationCounter] = pitch;
+								break;
+							case 4:
+								runningAverage[runningCalibrationCounter] = yaw;
+								break;
+							case 5:
+								runningAverage[runningCalibrationCounter] = yaw;
+								break;
+							default:
+								break;
+							}
+                    		
+//                    		Log.d("state", "count=" + runningCalibrationCounter);
+                    		if (runningCalibrationCounter + 1 >= RUNNING_AVERAGE_SAMPLE_SIZE) {
+                    			Log.i("state", "SWITCHED!!!!");
+                    			switchStateAndStore();
+                    			interruptBlink();
+                    			runningCalibrationCounter = (runningCalibrationCounter + 1) % RUNNING_AVERAGE_SAMPLE_SIZE;
+                    		} else {
+                    			runningCalibrationCounter = (runningCalibrationCounter + 1) % RUNNING_AVERAGE_SAMPLE_SIZE;
+                    		}
                     	}
                     } else {
                     	// start timer for interruption
@@ -560,9 +626,7 @@ public class AngularCalibrationActivity extends Activity implements Camera.Previ
                     	}
                     	// if interruption is over 250ms, this was intentional so stop the calibration
                     	if (blinkInterrupted && ((System.nanoTime() - interruptStart)/1000000) > 250) {
-                    		blinkStarted = false;
-                    		Log.d("state", "blink interrupted!");
-                    		blinkInterrupted = false;
+                    		interruptBlink();
                     	}
                     }
                 }
@@ -581,14 +645,71 @@ public class AngularCalibrationActivity extends Activity implements Camera.Previ
                 
                 runningCounter = (runningCounter + 1) % RUNNING_LENGTH;
                 
-                
-                drawView.setPointer(computeRunningAvg(runningArrayX), -computeRunningAvg(runningArrayY));
+               
                 setUI(numFaces, smileValue, leftEyeBlink, rightEyeBlink, faceRollValue, yaw, pitch, gazePointValue,
                         horizontalGaze, verticalGaze);
             }
         }
     }
     
+    private void interruptBlink() {
+    	blinkStarted = false;
+		Log.d("state", "blink interrupted!");
+		blinkInterrupted = false;
+		
+		drawView.setState(stateOut.get(state));
+		Log.d("state", "state=" + state);
+		runningCalibrationCounter = 0;
+    }
+
+	private void switchStateAndStore() {
+		double sum = 0.0;
+		for (int i = 0; i < runningAverage.length; i++) {
+			sum += runningAverage[i];
+		}
+		switch (state) {
+		case 0:
+			state = 1;
+			drawView.setState(stateOut.get(state));
+			avgFrontYaw = sum/runningAverage.length;
+			break;
+		case 1:
+			state = 2;
+			drawView.setState(stateOut.get(state));
+			avgFrontPitch = sum/runningAverage.length;
+			break;
+		case 2:
+			state = 3;
+			drawView.setState(stateOut.get(state));
+			avgMaxPitch = sum/runningAverage.length;
+			break;
+		case 3:
+			state = 4;
+			drawView.setState(stateOut.get(state));
+			avgMinPitch = sum/runningAverage.length;
+			break;
+		case 4:
+			state = 5;
+			drawView.setState(stateOut.get(state));
+			avgMinYaw = sum/runningAverage.length;
+			break;
+		case 5:
+			state = 6;
+			drawView.setState(stateOut.get(state));
+			avgMaxYaw = sum/runningAverage.length;
+			
+			cameraPause = true;
+			cameraObj.stopPreview();
+			
+			
+			Intent intent = new Intent(this, CameraPreviewActivity.class);
+			startActivity(intent);
+			this.finish();
+			
+		default:
+			break;
+		}
+	}
 
 	private double computeRunningAvg(double[] arr) {
 		double sum = 0.0;

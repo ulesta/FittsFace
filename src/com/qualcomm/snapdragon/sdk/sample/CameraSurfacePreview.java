@@ -1,6 +1,6 @@
 /*
  * ======================================================================
- * Copyright © 2014 Qualcomm Technologies, Inc. All Rights Reserved.
+ * Copyright ï¿½ 2014 Qualcomm Technologies, Inc. All Rights Reserved.
  * QTI Proprietary and Confidential.
  * =====================================================================
  * @file: CameraSurfacePreview.java

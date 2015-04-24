@@ -8,25 +8,30 @@
 
 package com.qualcomm.snapdragon.sdk.sample;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Point;
-import android.graphics.PorterDuff.Mode;
 import android.graphics.Rect;
+import android.graphics.Typeface;
+import android.graphics.PorterDuff.Mode;
 import android.hardware.Camera;
+import android.text.style.TypefaceSpan;
 import android.util.Log;
 import android.view.SurfaceView;
 
 import com.qualcomm.snapdragon.sdk.face.FaceData;
 
-public class DrawView extends SurfaceView {
+public class StateDrawView extends SurfaceView {
 
+    private final Paint mBrush = new Paint();
     private final Paint leftEyeBrush = new Paint();
     private final Paint rightEyeBrush = new Paint();
     private final Paint mouthBrush = new Paint();
     private final Paint rectBrush = new Paint();
+    
     public Point leftEye, rightEye, mouth;
     Rect mFaceRect;
     public FaceData[] mFaceArray;
@@ -55,7 +60,6 @@ public class DrawView extends SurfaceView {
     float NS_SCALE_X = 3.8f;
     float NS_SCALE_Y = 3.8f;
     
-    private int DEGREE_INTERVAL = 45;
     private int TARGET_RADIUS = 70;
     private int OFFSET = TARGET_RADIUS + TARGET_RADIUS/2;
     
@@ -71,9 +75,11 @@ public class DrawView extends SurfaceView {
     
     static final float ALPHA = 0.001f;
     
-    private static DrawView instance = null;
+    private static StateDrawView instance = null;
 
-    private DrawView(Context context, FaceData[] faceArray, boolean inFrame, int surfaceWidth, int surfaceHeight,
+    private String mState;
+    
+    private StateDrawView(Context context, FaceData[] faceArray, boolean inFrame, int surfaceWidth, int surfaceHeight,
             Camera cameraObj, boolean landScapeMode) {
         super(context);
         Log.d("const", "New one drawn!");
@@ -88,6 +94,8 @@ public class DrawView extends SurfaceView {
         pointerY = mSurfaceHeight/2;
         
         mRadius = (mSurfaceWidth / 2) - (OFFSET);
+        
+        mState = "";
         
         if (cameraObj != null) {
             cameraPreviewWidth = cameraObj.getParameters().getPreviewSize().width;
@@ -104,10 +112,10 @@ public class DrawView extends SurfaceView {
         
     }
     
-    public static DrawView getInstance(Context context, FaceData[] faceArray, boolean inFrame, int surfaceWidth, int surfaceHeight,
+    public static StateDrawView getInstance(Context context, FaceData[] faceArray, boolean inFrame, int surfaceWidth, int surfaceHeight,
             Camera cameraObj, boolean landScapeMode) {
     	if (instance == null) {
-    		instance = new DrawView(context, faceArray, inFrame, surfaceWidth, surfaceHeight, cameraObj, landScapeMode);
+    		instance = new StateDrawView(context, faceArray, inFrame, surfaceWidth, surfaceHeight, cameraObj, landScapeMode);
     	} else {
     		instance.reinit(context, faceArray, inFrame, surfaceWidth, surfaceHeight, cameraObj, landScapeMode);
     	}
@@ -129,6 +137,7 @@ public class DrawView extends SurfaceView {
         
         mRadius = (mSurfaceWidth / 2) - (OFFSET);
         
+        
         if (cameraObj != null) {
             cameraPreviewWidth = cameraObj.getParameters().getPreviewSize().width;
             cameraPreviewHeight = cameraObj.getParameters().getPreviewSize().height;
@@ -136,23 +145,15 @@ public class DrawView extends SurfaceView {
     	
     }
 
-    @Override
+    @SuppressLint("DrawAllocation") @Override
     protected void onDraw(Canvas canvas) {
-    	
-    	leftEyeBrush.setColor(Color.WHITE);
-    	
-    	canvas.drawRect(0, 0, mSurfaceWidth, mSurfaceHeight, leftEyeBrush);
-        canvas.drawLine(mSurfaceWidth/2, 0, mSurfaceWidth/2,
-                mSurfaceHeight, leftEyeBrush);
-        canvas.drawLine(0, mSurfaceHeight/2,
-                mSurfaceWidth, mSurfaceHeight/2, leftEyeBrush);
-    	
-    	
+    	mBrush.setColor(Color.WHITE);
+    	mBrush.setTextSize(40);
+        canvas.drawText(mState, 20, mSurfaceHeight - 20, mBrush);
+        
         if (_inFrame && mFaceArray != null)                // If the face detected is in frame.
         {
         	leftEyeBrush.setColor(Color.RED);
-            canvas.drawCircle(pointerX, pointerY, 20f,
-                    leftEyeBrush);
 
             for (int i = 0; i < mFaceArray.length; i++) {
                 if (mFaceArray[i].leftEye != null) {
@@ -272,14 +273,13 @@ public class DrawView extends SurfaceView {
                     
                     sampleCount = (sampleCount + 1) % RUNNING_ARR_LEN;
                     
-                    resultNoseTipX = computeRunningAverage(runningArrayX);
-                    resultNoseTipY = computeRunningAverage(runningArrayY);
+
                    
                     lastResultNoseTipX = resultNoseTipX;
                     lastResultNoseTipY = resultNoseTipY;
                     
                     mouthBrush.setColor(Color.MAGENTA);
-                    canvas.drawCircle(resultNoseTipX, resultNoseTipY, 20f, mouthBrush);
+//                    canvas.drawCircle(resultNoseTipX, resultNoseTipY, 20f, mouthBrush);
                     /** ------- [END - NOSE TIP COORD PROCEDURES] ------- */
                     
                     mouthBrush.setColor(Color.CYAN);
@@ -304,28 +304,12 @@ public class DrawView extends SurfaceView {
                 
             }
             
-            // Draw Fitts
-        	double rad = (Math.PI)/180;
-        	for (int i = 0; i <= 360; i += DEGREE_INTERVAL) {
-	        	rectBrush.setColor(Color.GREEN);
-				rectBrush.setColor(Color.argb(200, (int)(255*Math.cos(i)), 200, 0));
-	        	rectBrush.setStyle(Paint.Style.FILL);
-	        	canvas.drawCircle((float) (mSurfaceWidth/2 + (Math.cos(rad*i) * mRadius)), (float)(mSurfaceHeight/2 + (Math.sin(rad*i) * mRadius)), TARGET_RADIUS, rectBrush);
-        	}
             
         } else {
             canvas.drawColor(0, Mode.CLEAR);
         }
     }
     
-	private float computeRunningAverage(float[] arr) {
-    	float sum = 0.0f;
-		for (int i = 0; i < arr.length; i++) {
-			sum += arr[i];
-		}
-		return sum/arr.length;
-	}
-
 	public void setPointer( double d, double e) {
     	this.pointerX = (int) ((mSurfaceWidth/2) + d);
     	this.pointerY = (int) ((mSurfaceHeight/2) + e);
@@ -341,4 +325,8 @@ public class DrawView extends SurfaceView {
         output = output + ALPHA * (input - output);
         return output;
     }
+
+	public void setState(String state) {
+		mState = state;
+	}
 }
