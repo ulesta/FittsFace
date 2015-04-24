@@ -45,7 +45,7 @@ import com.qualcomm.snapdragon.sdk.face.FacialProcessing.FP_MODES;
 import com.qualcomm.snapdragon.sdk.face.FacialProcessing.PREVIEW_ROTATION_ANGLE;
 
 @SuppressLint("NewApi")
-public class CameraPreviewActivity extends Activity implements Camera.PreviewCallback {
+public class AngularCalibrationActivity extends Activity implements Camera.PreviewCallback {
 
     // Global Variables Required
 
@@ -105,11 +105,21 @@ public class CameraPreviewActivity extends Activity implements Camera.PreviewCal
 
     float ALPHA = 0.05f;
     
+    int[][] stateMatrix;
+    int initialState = 0;
+    
+    float lastTimeNano;
+    float elapsedTimeNano;
+    boolean blinkStarted = false;
+    float startTimeNano;
+    boolean blinkInterrupted = false;
+    float interruptStart;
+    
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_camera_preview);
-        myView = new View(CameraPreviewActivity.this);
+        myView = new View(AngularCalibrationActivity.this);
         // Create our Preview view and set it as the content of our activity.
         preview = (FrameLayout) findViewById(R.id.camera_preview);
         numFaceText = (TextView) findViewById(R.id.numFaces);
@@ -145,11 +155,11 @@ public class CameraPreviewActivity extends Activity implements Camera.PreviewCal
         }
 
         // Change the sizes according to phone's compatibility.
-        mPreview = new CameraSurfacePreview(CameraPreviewActivity.this, cameraObj, faceProc);
+        mPreview = new CameraSurfacePreview(AngularCalibrationActivity.this, cameraObj, faceProc);
         preview.removeView(mPreview);
         preview = (FrameLayout) findViewById(R.id.camera_preview);
         preview.addView(mPreview);
-        cameraObj.setPreviewCallback(CameraPreviewActivity.this);
+        cameraObj.setPreviewCallback(AngularCalibrationActivity.this);
 
         // Action listener for the screen touch to display the face data info.
         touchScreenListener();
@@ -167,6 +177,18 @@ public class CameraPreviewActivity extends Activity implements Camera.PreviewCal
         // initialize running array
         runningArrayX = new double[RUNNING_LENGTH];
         runningArrayY = new double[RUNNING_LENGTH];
+        
+        /**						s0		s1		s2		s3		s4		s5		s6		s7
+         * s0: look straight													s1
+         * s1: rotate up														s2
+         * s2: rotate down														s3
+         * s3: rotate left														s4
+         * s4: rotate right														s7
+         * s5: smiling
+         * s6: recorded
+         * s7: done																		nextActivity
+         */
+        
     }
 
     FaceDetectionListener faceDetectionListener = new FaceDetectionListener() {
@@ -206,7 +228,7 @@ public class CameraPreviewActivity extends Activity implements Camera.PreviewCal
                     if (!info) {
                         LayoutParams layoutParams = preview.getLayoutParams();
 
-                        if (CameraPreviewActivity.this.getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                        if (AngularCalibrationActivity.this.getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE) {
                             int oldHeight = preview.getHeight();
                             layoutParams.height = oldHeight * 3 / 4;
                         } else {
@@ -251,21 +273,21 @@ public class CameraPreviewActivity extends Activity implements Camera.PreviewCal
                 {
                     stopCamera();
                     cameraObj = Camera.open(BACK_CAMERA_INDEX);
-                    mPreview = new CameraSurfacePreview(CameraPreviewActivity.this, cameraObj, faceProc);
+                    mPreview = new CameraSurfacePreview(AngularCalibrationActivity.this, cameraObj, faceProc);
                     preview = (FrameLayout) findViewById(R.id.camera_preview);
                     preview.addView(mPreview);
                     cameraSwitch = true;
-                    cameraObj.setPreviewCallback(CameraPreviewActivity.this);
+                    cameraObj.setPreviewCallback(AngularCalibrationActivity.this);
                 } else						// If the camera is facing back then do this.
                 {
                     stopCamera();
                     cameraObj = Camera.open(FRONT_CAMERA_INDEX);
                     preview.removeView(mPreview);
-                    mPreview = new CameraSurfacePreview(CameraPreviewActivity.this, cameraObj, faceProc);
+                    mPreview = new CameraSurfacePreview(AngularCalibrationActivity.this, cameraObj, faceProc);
                     preview = (FrameLayout) findViewById(R.id.camera_preview);
                     preview.addView(mPreview);
                     cameraSwitch = false;
-                    cameraObj.setPreviewCallback(CameraPreviewActivity.this);
+                    cameraObj.setPreviewCallback(AngularCalibrationActivity.this);
                 }
 
             }
@@ -288,7 +310,7 @@ public class CameraPreviewActivity extends Activity implements Camera.PreviewCal
                     cameraPause = true;
                 } else {
                     cameraObj.startPreview();
-                    cameraObj.setPreviewCallback(CameraPreviewActivity.this);
+                    cameraObj.setPreviewCallback(AngularCalibrationActivity.this);
                     cameraPause = false;
                 }
 
@@ -380,11 +402,11 @@ public class CameraPreviewActivity extends Activity implements Camera.PreviewCal
             Log.d("TAG", "Camera Does Not exist");// Camera is not available (in use or does not exist)
         }
 
-        mPreview = new CameraSurfacePreview(CameraPreviewActivity.this, cameraObj, faceProc);
+        mPreview = new CameraSurfacePreview(AngularCalibrationActivity.this, cameraObj, faceProc);
         preview.removeView(mPreview);
         preview = (FrameLayout) findViewById(R.id.camera_preview);
         preview.addView(mPreview);
-        cameraObj.setPreviewCallback(CameraPreviewActivity.this);
+        cameraObj.setPreviewCallback(AngularCalibrationActivity.this);
 
     }
 
@@ -521,7 +543,33 @@ public class CameraPreviewActivity extends Activity implements Camera.PreviewCal
                     horizontalGaze = faceArray[j].getEyeHorizontalGazeAngle();
                     verticalGaze = faceArray[j].getEyeVerticalGazeAngle();
                     
+                    
+                    if (rightEyeBlink > 60) {
+                    	if (!blinkStarted) {
+                    		startTimeNano = System.nanoTime();
+                    		blinkStarted = true;
+                    	}
+                    	if (blinkStarted && ((System.nanoTime() - startTimeNano)/1000000) > 1000) {
+                    		Log.d("state", "calibration!");
+                    	}
+                    } else {
+                    	// start timer for interruption
+                    	if (blinkStarted && !blinkInterrupted) {
+                    		blinkInterrupted = true;
+                    		interruptStart = System.nanoTime();
+                    	}
+                    	// if interruption is over 250ms, this was intentional so stop the calibration
+                    	if (blinkInterrupted && ((System.nanoTime() - interruptStart)/1000000) > 250) {
+                    		blinkStarted = false;
+                    		Log.d("state", "blink interrupted!");
+                    		blinkInterrupted = false;
+                    	}
+                    }
                 }
+                
+                
+                lastTimeNano = System.currentTimeMillis();
+               
                 
                 int scaleUnitCircle = 1500;
                 
